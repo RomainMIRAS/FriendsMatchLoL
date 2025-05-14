@@ -1,0 +1,72 @@
+/* Custom styles for FriendsMatchLoL */
+
+body {
+    background-color: #f4f4f4;
+    padding-bottom: 70px;
+}
+
+.navbar-brand {
+    font-weight: bold;
+}
+
+/* Card styling for friends */
+.card {
+    transition: transform 0.3s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Status indicators */
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+}
+
+.status-online {
+    background-color: #28a745;
+}
+
+.status-offline {
+    background-color: #6c757d;
+}
+
+.status-ingame {
+    background-color: #ffc107;
+}
+
+/* Champion icons */
+.champion-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #343a40;
+}
+
+/* Match details modal */
+.team-blue {
+    background-color: rgba(0, 123, 255, 0.1);
+    border-left: 4px solid #007bff;
+}
+
+.team-red {
+    background-color: rgba(220, 53, 69, 0.1);
+    border-left: 4px solid #dc3545;
+}
+
+.player-row {
+    padding: 8px;
+    margin: 4px 0;
+    border-radius: 4px;
+}
+
+.player-highlight {
+    font-weight: bold;
+    background-color: rgba(255, 193, 7, 0.2);
+}
