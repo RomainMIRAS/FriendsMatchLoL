@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/riot_api.php';
+require_once __DIR__ . '../includes/utils.php';
 
 // Vérifier si l'utilisateur est connecté
 session_start();

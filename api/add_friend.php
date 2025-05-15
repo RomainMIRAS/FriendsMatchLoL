@@ -65,13 +65,33 @@ if (!$summonerInfo || !$foundRegion) {
     exit;
 }
 
+// Vérifier et compléter les données manquantes si nécessaire
+if (!isset($summonerInfo['id']) || empty($summonerInfo['id'])) {
+    // Générer un ID unique basé sur PUUID si celui du summoner est manquant
+    $summonerInfo['id'] = 'gen_' . substr(md5($accountInfo['puuid']), 0, 16);
+    error_log("Summoner ID manquant, utilisation d'un ID généré: " . $summonerInfo['id']);
+}
+
+if (!isset($summonerInfo['name']) || empty($summonerInfo['name'])) {
+    // Utiliser le gameName comme fallback
+    $summonerInfo['name'] = $gameName;
+    error_log("Summoner Name manquant, utilisation du gameName: " . $summonerInfo['name']);
+}
+
 // Vérifier si cet ami existe déjà dans la liste de l'utilisateur
 try {
     $db = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME, DB_USER, DB_PASS);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    $stmt = $db->prepare("SELECT id FROM friends WHERE user_id = :user_id AND summoner_id = :summoner_id AND region = :region");
+    
+    // Vérifier l'existence de l'ami par PUUID (plus fiable que summoner_id)
+    $stmt = $db->prepare("
+        SELECT id FROM friends 
+        WHERE user_id = :user_id 
+        AND (puuid = :puuid OR (summoner_id = :summoner_id AND region = :region))
+    ");
     $stmt->bindParam(':user_id', $_SESSION['user_id']);
+    $stmt->bindParam(':puuid', $accountInfo['puuid']);
     $stmt->bindParam(':summoner_id', $summonerInfo['id']);
     $stmt->bindParam(':region', $foundRegion);
     $stmt->execute();
@@ -87,13 +107,22 @@ try {
         VALUES (:user_id, :summoner_id, :summoner_name, :puuid, :region, :riot_id)
     ");
     
+    // S'assurer que le summoner_name n'est jamais NULL
+    $summonerName = isset($summonerInfo['name']) && !empty($summonerInfo['name']) 
+        ? $summonerInfo['name'] 
+        : $gameName; // Utiliser le gameName comme fallback
+    
     $riotId = $gameName . '#' . $tagLine;
     $stmt->bindParam(':user_id', $_SESSION['user_id']);
     $stmt->bindParam(':summoner_id', $summonerInfo['id']);
-    $stmt->bindParam(':summoner_name', $summonerInfo['name']);
+    $stmt->bindParam(':summoner_name', $summonerName);
     $stmt->bindParam(':puuid', $accountInfo['puuid']);
     $stmt->bindParam(':region', $foundRegion);
     $stmt->bindParam(':riot_id', $riotId);
+    
+    // Ajouter un log pour le débogage
+    error_log("Ajout d'ami - PUUID: {$accountInfo['puuid']}, Summoner Name: {$summonerName}, Riot ID: {$riotId}, Region: {$foundRegion}");
+    
     $stmt->execute();
     
     header('Location: ../index.php?success=friend_added');
