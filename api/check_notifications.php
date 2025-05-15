@@ -10,9 +10,21 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-// Récupérer les préférences de notification de l'utilisateur
-// Dans un vrai environnement, ces données viendraient de la base de données
-$notificationsEnabled = true; // Simuler que les notifications sont activées
+// Récupérer les préférences de notification de l'utilisateur depuis la base de données
+try {
+    $db = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME, DB_USER, DB_PASS);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    $stmt = $db->prepare("SELECT notifications_enabled FROM users WHERE id = :user_id");
+    $stmt->bindParam(':user_id', $_SESSION['user_id']);
+    $stmt->execute();
+    
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $notificationsEnabled = $user && $user['notifications_enabled'] == 1;
+    
+} catch (PDOException $e) {
+    $notificationsEnabled = false;
+}
 
 if (!$notificationsEnabled) {
     header('Content-Type: application/json');

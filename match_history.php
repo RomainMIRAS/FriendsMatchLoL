@@ -3,23 +3,26 @@ require_once 'includes/header.php';
 require_once 'config/config.php';
 require_once 'api/riot_api.php';
 
-// Vérifier si l'utilisateur est connecté
+// Check if user is logged in
 session_start();
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
 
-// Vérifier si un ami a été spécifié
+// Check if a friend has been specified
 $friendId = isset($_GET['friend_id']) ? (int)$_GET['friend_id'] : null;
 
-// Si aucun ami n'est spécifié, rediriger vers la page d'accueil
+// If no friend is specified, redirect to the home page
 if (!$friendId) {
     header('Location: index.php');
     exit;
 }
 
-// Récupérer les informations de l'ami
+// Charger les utilitaires
+require_once 'includes/utils.php';
+
+// Get friend's information
 $friends = getFriendsList($_SESSION['user_id']);
 $currentFriend = null;
 
@@ -30,70 +33,129 @@ foreach ($friends as $friend) {
     }
 }
 
-// Si l'ami n'existe pas, rediriger vers la page d'accueil
+// If the friend doesn't exist, redirect to the home page
 if (!$currentFriend) {
     header('Location: index.php?error=friend_not_found');
     exit;
 }
 
-// Récupérer l'historique des parties de l'ami
-// Dans une implémentation réelle, vous utiliseriez l'API Riot pour récupérer ces données
-$matchHistory = [
-    [
-        'game_id' => 'EUW_12345678',
-        'champion' => 'LeBlanc',
-        'result' => 'Victoire',
-        'kda' => '7/2/10',
-        'cs' => 186,
-        'duration' => '28:45',
-        'date' => 'Il y a 2 heures',
-        'queue_type' => 'Classé Solo/Duo'
-    ],
-    [
-        'game_id' => 'EUW_87654321',
-        'champion' => 'Syndra',
-        'result' => 'Défaite',
-        'kda' => '3/5/4',
-        'cs' => 156,
-        'duration' => '32:12',
-        'date' => 'Il y a 4 heures',
-        'queue_type' => 'Normal Draft'
-    ],
-    [
-        'game_id' => 'EUW_24681357',
-        'champion' => 'Ahri',
-        'result' => 'Victoire',
-        'kda' => '12/3/8',
-        'cs' => 201,
-        'duration' => '25:30',
-        'date' => 'Il y a 7 heures',
-        'queue_type' => 'Classé Solo/Duo'
-    ],
-    [
-        'game_id' => 'EUW_97531642',
-        'champion' => 'Zed',
-        'result' => 'Victoire',
-        'kda' => '8/1/3',
-        'cs' => 178,
-        'duration' => '22:18',
-        'date' => 'Il y a 1 jour',
-        'queue_type' => 'ARAM'
-    ],
-    [
-        'game_id' => 'EUW_76543219',
-        'champion' => 'Orianna',
-        'result' => 'Défaite',
-        'kda' => '2/7/9',
-        'cs' => 145,
-        'duration' => '36:05',
-        'date' => 'Il y a 1 jour',
-        'queue_type' => 'Classé Solo/Duo'
-    ]
-];
+// Get friend's match history using Riot API
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 0;
+$matchesPerPage = 10;
+$start = $page * $matchesPerPage;
+
+// Récupérer l'historique des matchs depuis l'API Riot
+$matchIds = getMatchHistory($currentFriend['puuid'], $currentFriend['region'], $matchesPerPage, $start);
+$matchHistory = [];
+
+if ($matchIds) {
+    foreach ($matchIds as $matchId) {
+        $matchDetails = getMatchDetails($matchId, $currentFriend['region']);
+        if ($matchDetails) {
+            // Trouver les données du joueur dans le match
+            $participantIndex = -1;
+            foreach ($matchDetails['info']['participants'] as $index => $participant) {
+                if ($participant['puuid'] === $currentFriend['puuid']) {
+                    $participantIndex = $index;
+                    break;
+                }
+            }
+
+            if ($participantIndex >= 0) {
+                $playerData = $matchDetails['info']['participants'][$participantIndex];
+                $teamId = $playerData['teamId'];
+                $win = $playerData['win'];
+
+                // Formatage des données pour l'affichage
+                $kda = $playerData['kills'] . '/' . $playerData['deaths'] . '/' . $playerData['assists'];
+                $cs = $playerData['totalMinionsKilled'] + (isset($playerData['neutralMinionsKilled']) ? $playerData['neutralMinionsKilled'] : 0);
+                $duration = floor($matchDetails['info']['gameDuration'] / 60) . ':' . str_pad($matchDetails['info']['gameDuration'] % 60, 2, '0', STR_PAD_LEFT);
+                $date = humanTimeDiff($matchDetails['info']['gameCreation'] / 1000);
+                $queueType = getQueueTypeName($matchDetails['info']['queueId']);
+
+                $matchHistory[] = [
+                    'game_id' => $matchId,
+                    'champion' => $playerData['championName'],
+                    'result' => $win ? 'Victory' : 'Defeat',
+                    'kda' => $kda,
+                    'cs' => $cs,
+                    'duration' => $duration,
+                    'date' => $date,
+                    'queue_type' => $queueType,
+                    'champion_id' => $playerData['championId'],
+                    'items' => [
+                        $playerData['item0'], $playerData['item1'], $playerData['item2'],
+                        $playerData['item3'], $playerData['item4'], $playerData['item5'], $playerData['item6']
+                    ],
+                    'win' => $win
+                ];
+            }
+        }
+    }
+}
+
+// Si aucun match n'a été trouvé via l'API, on ajoute des données de démonstration
+if (empty($matchHistory)) {
+    $matchHistory = [
+        [
+            'game_id' => 'EUW_87654321',
+            'champion' => 'Syndra',
+            'result' => 'Defeat',
+            'kda' => '3/5/4',
+            'cs' => 156,
+            'duration' => '32:12',
+            'date' => '4 hours ago',
+            'queue_type' => 'Normal Draft',
+            'win' => false,
+            'items' => [3020, 3157, 3089, 3135, 3165, 3116, 3363]
+        ],
+        [
+            'game_id' => 'EUW_24681357',
+            'champion' => 'Ahri',
+            'result' => 'Victory',
+            'kda' => '12/3/8',
+            'cs' => 201,
+            'duration' => '25:30',
+            'date' => '7 hours ago',
+            'queue_type' => 'Ranked Solo/Duo',
+            'win' => true,
+            'items' => [3020, 3165, 3089, 3152, 3102, 3135, 3363]
+        ],
+        [
+            'game_id' => 'EUW_97531642',
+            'champion' => 'Zed',
+            'result' => 'Victory',
+            'kda' => '8/1/3',
+            'cs' => 178,
+            'duration' => '22:18',
+            'date' => '1 day ago',
+            'queue_type' => 'ARAM',
+            'win' => true,
+            'items' => [3142, 3814, 3074, 3156, 3071, 3047, 3364]
+        ],
+        [
+            'game_id' => 'EUW_76543219',
+            'champion' => 'Orianna',
+            'result' => 'Defeat',
+            'kda' => '2/7/9',
+            'cs' => 145,
+            'duration' => '36:05',
+            'date' => '1 day ago',
+            'queue_type' => 'Ranked Solo/Duo',
+            'win' => false,
+            'items' => [3020, 3157, 3089, 3135, 3115, 3151, 3363]
+        ]
+    ];
+}
 ?>
 
 <div class="container mt-5">
-    <h1>Historique des matchs de <?php echo htmlspecialchars($currentFriend['summoner_name']); ?></h1>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Historique des matchs de <?php echo htmlspecialchars($currentFriend['summoner_name']); ?></h1>
+        <a href="index.php" class="btn btn-primary">
+            <i class="fas fa-arrow-left"></i> Retour
+        </a>
+    </div>
     
     <nav aria-label="breadcrumb" class="mb-4">
         <ol class="breadcrumb">
@@ -105,8 +167,8 @@ $matchHistory = [
     <div class="card mb-4">
         <div class="card-header">
             <div class="d-flex justify-content-between align-items-center">
-                <h2>Profil d'invocateur</h2>
-                <a href="index.php" class="btn btn-secondary">Retour à la liste des amis</a>
+                <h2>Summoner Profile</h2>
+                <a href="index.php" class="btn btn-secondary">Back to Friends List</a>
             </div>
         </div>
         <div class="card-body">
@@ -116,14 +178,14 @@ $matchHistory = [
                         <span class="text-white" style="font-size:24px"><?php echo substr($currentFriend['summoner_name'], 0, 1); ?></span>
                     </div>
                     <h4><?php echo htmlspecialchars($currentFriend['summoner_name']); ?></h4>
-                    <p class="text-muted">Région: <?php echo strtoupper($currentFriend['region']); ?></p>
+                    <p class="text-muted">Region: <?php echo strtoupper($currentFriend['region']); ?></p>
                 </div>
                 <div class="col-md-9">
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <div class="card bg-light">
                                 <div class="card-body text-center">
-                                    <h5>Parties suivies</h5>
+                                    <h5>Tracked Games</h5>
                                     <h3>23</h3>
                                 </div>
                             </div>
@@ -131,7 +193,7 @@ $matchHistory = [
                         <div class="col-md-4 mb-3">
                             <div class="card bg-success text-white">
                                 <div class="card-body text-center">
-                                    <h5>Victoires</h5>
+                                    <h5>Victories</h5>
                                     <h3>14</h3>
                                 </div>
                             </div>
@@ -139,14 +201,14 @@ $matchHistory = [
                         <div class="col-md-4 mb-3">
                             <div class="card bg-danger text-white">
                                 <div class="card-body text-center">
-                                    <h5>Défaites</h5>
+                                    <h5>Defeats</h5>
                                     <h3>9</h3>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="mt-3">
-                        <h5>Champions les plus joués</h5>
+                        <h5>Most Played Champions</h5>
                         <div class="d-flex">
                             <div class="me-3 text-center">
                                 <div class="bg-dark rounded-circle mb-1 d-flex align-items-center justify-content-center" style="width:50px;height:50px">
@@ -175,7 +237,7 @@ $matchHistory = [
     
     <div class="card">
         <div class="card-header">
-            <h2>Parties récentes</h2>
+            <h2>Recent Games</h2>
         </div>
         <div class="card-body">
             <div class="table-responsive">
@@ -183,12 +245,12 @@ $matchHistory = [
                     <thead>
                         <tr>
                             <th>Date</th>
-                            <th>File d'attente</th>
+                            <th>Queue</th>
                             <th>Champion</th>
                             <th>K/D/A</th>
                             <th>CS</th>
-                            <th>Durée</th>
-                            <th>Résultat</th>
+                            <th>Duration</th>
+                            <th>Result</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -209,13 +271,13 @@ $matchHistory = [
                                 <td><?php echo $match['cs']; ?></td>
                                 <td><?php echo htmlspecialchars($match['duration']); ?></td>
                                 <td>
-                                    <span class="badge <?php echo $match['result'] === 'Victoire' ? 'bg-success' : 'bg-danger'; ?>">
+                                    <span class="badge <?php echo $match['result'] === 'Victory' ? 'bg-success' : 'bg-danger'; ?>"></span>
                                         <?php echo htmlspecialchars($match['result']); ?>
                                     </span>
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-info match-details" data-match="<?php echo $match['game_id']; ?>" data-bs-toggle="modal" data-bs-target="#matchDetailsModal">
-                                        Détails
+                                        Details
                                     </button>
                                 </td>
                             </tr>
@@ -225,16 +287,16 @@ $matchHistory = [
             </div>
             
             <div class="d-flex justify-content-center mt-4">
-                <nav aria-label="Pagination de l'historique des matchs">
+                <nav aria-label="Match history pagination"></nav>
                     <ul class="pagination">
                         <li class="page-item disabled">
-                            <a class="page-link" href="#" tabindex="-1" aria-disabled="true">Précédent</a>
+                            <a class="page-link" href="#" tabindex="-1" aria-disabled="true">Previous</a>
                         </li>
                         <li class="page-item active"><a class="page-link" href="#">1</a></li>
                         <li class="page-item"><a class="page-link" href="#">2</a></li>
                         <li class="page-item"><a class="page-link" href="#">3</a></li>
                         <li class="page-item">
-                            <a class="page-link" href="#">Suivant</a>
+                            <a class="page-link" href="#">Next</a>
                         </li>
                     </ul>
                 </nav>
@@ -243,20 +305,20 @@ $matchHistory = [
     </div>
 </div>
 
-<!-- Modal pour les détails du match -->
+<!-- Match details modal -->
 <div class="modal fade" id="matchDetailsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Détails du match</h5>
+                <h5 class="modal-title">Match Details</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="match-details-content">
                 <div class="text-center">
                     <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Chargement...</span>
+                        <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p>Chargement des détails du match...</p>
+                    <p>Loading match details...</p>
                 </div>
             </div>
         </div>
@@ -265,24 +327,24 @@ $matchHistory = [
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Afficher les détails du match
+        // Display match details
         const matchDetailsButtons = document.querySelectorAll('.match-details');
         matchDetailsButtons.forEach(function(button) {
             button.addEventListener('click', function() {
                 const matchId = this.getAttribute('data-match');
                 
-                // Afficher le spinner de chargement
+                // Show loading spinner
                 document.getElementById('match-details-content').innerHTML = `
                     <div class="text-center">
                         <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Chargement...</span>
+                            <span class="visually-hidden">Loading...</span>
                         </div>
-                        <p>Chargement des détails du match...</p>
+                        <p>Loading match details...</p>
                     </div>
                 `;
                 
-                // Dans une implémentation réelle, vous feriez une requête AJAX
-                // Pour cette démonstration, on simule un délai de chargement
+                // In a real implementation, you would make an AJAX request
+                // For this demo, we simulate a loading delay
                 setTimeout(function() {
                     fetch('api/get_match_details.php?match_id=' + matchId)
                         .then(response => response.text())
@@ -292,7 +354,7 @@ $matchHistory = [
                         .catch(error => {
                             document.getElementById('match-details-content').innerHTML = `
                                 <div class="alert alert-danger">
-                                    Une erreur s'est produite lors du chargement des détails du match.
+                                    An error occurred while loading match details.
                                 </div>
                             `;
                         });

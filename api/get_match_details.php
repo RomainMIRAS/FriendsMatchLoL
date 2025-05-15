@@ -17,28 +17,40 @@ if (!isset($_GET['match_id'])) {
 
 $matchId = $_GET['match_id'];
 
-// Déterminer la région à partir de l'ID du match
-// Format supposé : RÉGION_NUMEROID (ex: EUW_12345678)
-list($region, $numericId) = explode('_', $matchId, 2);
-$region = strtolower($region);
+// Pour les nouvelles API de matchs, vérifier si on a la région
+if (!isset($_GET['region'])) {
+    // Si la région n'est pas spécifiée, essayons de l'extraire de l'ID du match
+    if (strpos($matchId, '_') !== false) {
+        list($regionCode, $pureMatchId) = explode('_', $matchId, 2);
+        $region = strtolower($regionCode);
+    } else {
+        header('HTTP/1.1 400 Bad Request');
+        exit('Région manquante');
+    }
+} else {
+    $region = strtolower($_GET['region']);
+    $pureMatchId = $matchId;
+}
+
+// Charger les utilitaires
+require_once __DIR__ . '/../includes/utils.php';
 
 // Récupérer les détails du match
-$matchDetails = getMatchDetails($numericId, $region);
+// D'abord, on essaie de récupérer un match terminé
+$matchDetails = getMatchDetails($pureMatchId, $region);
+
+// Si aucun match terminé n'est trouvé, on essaie de récupérer un match en cours
+if (!$matchDetails) {
+    $matchDetails = getCurrentGameDetails($pureMatchId, $region);
+}
 
 if (!$matchDetails) {
     echo '<div class="alert alert-danger">Impossible de récupérer les détails du match.</div>';
     exit;
 }
 
-// Remplacer par des données fictives pour cette démonstration
-$matchDetails = [
-    'gameId' => $numericId,
-    'gameType' => 'MATCHED_GAME',
-    'gameMode' => 'CLASSIC',
-    'mapId' => 11,
-    'gameQueueConfigId' => 420,
-    'participants' => [
-        // Équipe bleue (100)
+// Si les données sont récupérées avec succès, on affiche le résultat
+?>
         [
             'teamId' => 100,
             'championId' => 7,

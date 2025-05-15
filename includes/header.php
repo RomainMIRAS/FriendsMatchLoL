@@ -1,3 +1,16 @@
+<?php
+// Initialiser la session si ce n'est pas déjà fait
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Inclure les fonctions utilitaires
+require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/utils.php';
+
+// Vérifier le token "Se souvenir de moi"
+checkRememberMeToken();
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -13,6 +26,7 @@
     
     <!-- Custom CSS -->
     <link href="css/style.css" rel="stylesheet">
+    <link href="css/match-history.css" rel="stylesheet">
     
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -27,7 +41,7 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="index.php">Accueil</a>
+                        <a class="nav-link" href="index.php">Home</a>
                     </li>
                 </ul>
                 <?php if (isset($_SESSION['user_id'])): ?>
@@ -37,9 +51,9 @@
                             <i class="fas fa-user"></i> <?php echo htmlspecialchars($_SESSION['username']); ?>
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
-                            <li><a class="dropdown-item" href="profile.php">Mon profil</a></li>
+                            <li><a class="dropdown-item" href="profile.php">My Profile</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="logout.php">Déconnexion</a></li>
+                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
                         </ul>
                     </li>
                 </ul>

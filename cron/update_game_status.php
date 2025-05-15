@@ -48,7 +48,8 @@ foreach ($friends as $friend) {
     $currentStatus = $stmt->fetch(PDO::FETCH_ASSOC);
     
     // Vérifier si l'ami est en jeu
-    $matchData = getCurrentMatch($friend['summoner_id'], $friend['region']);
+    // Utiliser le PUUID comme solution de secours si summoner_id n'est pas disponible
+    $matchData = getCurrentMatch($friend['summoner_id'], $friend['region'], $friend['puuid'] ?? null);
     $isInGame = ($matchData !== null);
     
     if ($isInGame) {
@@ -59,9 +60,11 @@ foreach ($friends as $friend) {
         $championId = null;
         $queueTypeId = $matchData['gameQueueConfigId'];
         
-        // Trouver le champion que l'ami joue
+        // Trouver le champion que l'ami joue - utiliser PUUID si disponible
         foreach ($matchData['participants'] as $participant) {
-            if ($participant['summonerId'] === $friend['summoner_id']) {
+            // Vérifier d'abord par summonerId, puis par PUUID si disponible
+            if ($participant['summonerId'] === $friend['summoner_id'] || 
+                (isset($participant['puuid']) && isset($friend['puuid']) && $participant['puuid'] === $friend['puuid'])) {
                 $championId = $participant['championId'];
                 break;
             }

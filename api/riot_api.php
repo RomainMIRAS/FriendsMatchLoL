@@ -31,7 +31,27 @@ function callRiotAPI($region, $endpoint, $params = []) {
     curl_close($ch);
     
     if ($httpCode !== 200) {
-        logAPIError($httpCode, $apiUrl, $response);
+        // Déterminer le type d'endpoint pour un meilleur logging
+        $endpointType = "Generic";
+        if (strpos($endpoint, '/riot/account/v1/accounts/by-riot-id/') !== false) {
+            $endpointType = "Riot ID";
+        } elseif (strpos($endpoint, '/lol/summoner/v4/summoners/by-puuid/') !== false) {
+            $endpointType = "Summoner by PUUID";
+        } elseif (strpos($endpoint, '/lol/summoner/v4/summoners/by-name/') !== false) {
+            $endpointType = "Summoner by Name";
+        } elseif (strpos($endpoint, '/lol/spectator/v4/active-games/by-summoner/') !== false) {
+            $endpointType = "Active Game";
+        }
+        
+        logAPIError($httpCode, $apiUrl, $response, $endpointType);
+        
+        // Pour les erreurs 404 sur les Riot IDs, fournir une erreur plus descriptive
+        if ($httpCode === 404 && $endpointType === "Riot ID") {
+            error_log("Riot ID non trouvé: $apiUrl");
+        } else {
+            error_log("API Error: $httpCode | URL: $apiUrl | Response: $response");
+        }
+        
         return null;
     }
     
@@ -40,21 +60,83 @@ function callRiotAPI($region, $endpoint, $params = []) {
 
 /**
  * Log les erreurs d'API
+ * 
+ * @param int $code Le code HTTP de l'erreur
+ * @param string $url L'URL appelée
+ * @param string $response La réponse de l'API
+ * @param string $endpoint Le type d'endpoint utilisé (ex: "Riot ID", "Summoner", etc.)
  */
-function logAPIError($code, $url, $response) {
+function logAPIError($code, $url, $response, $endpoint = "Generic") {
     $logFile = __DIR__ . '/../logs/api_errors.log';
-    $errorMessage = date('Y-m-d H:i:s') . " | Code: $code | URL: $url | Response: $response\n";
     
-    // Créer le dossier logs s'il n'existe pas
-    if (!is_dir(dirname($logFile))) {
-        mkdir(dirname($logFile), 0755, true);
+    // Analyser la réponse pour obtenir des détails d'erreur
+    $errorDetails = json_decode($response, true);
+    $errorStatus = isset($errorDetails['status']) ? $errorDetails['status']['message'] : 'Unknown error';
+    
+    // Format amélioré du message d'erreur
+    $errorMessage = sprintf(
+        "[%s] | Endpoint: %s | Code: %d | Status: %s | URL: %s | Response: %s\n",
+        date('Y-m-d H:i:s'),
+        $endpoint,
+        $code,
+        $errorStatus,
+        $url,
+        $response
+    );
+    
+    try {
+        // Créer le dossier logs s'il n'existe pas
+        if (!is_dir(dirname($logFile))) {
+            if (!@mkdir(dirname($logFile), 0755, true)) {
+                error_log("Failed to create log directory: " . dirname($logFile));
+                return;
+            }
+        }
+        
+        // Essayer d'écrire dans le fichier
+        if (!@file_put_contents($logFile, $errorMessage, FILE_APPEND)) {
+            error_log("Failed to write to log file: $logFile");
+        }
+    } catch (Exception $e) {
+        error_log("Error logging API error: " . $e->getMessage());
     }
-    
-    file_put_contents($logFile, $errorMessage, FILE_APPEND);
 }
 
 /**
  * Récupère les informations d'un invocateur par son nom
+ */
+/**
+ * Récupère les informations d'un compte par Riot ID (nouveau format gameName#tagLine)
+ * 
+ * @param string $gameName Le nom de jeu (partie avant le #)
+ * @param string $tagLine Le tag (partie après le #)
+ * @param string $region La région continentale (europe, americas, asia, sea)
+ * @return array|null Informations du compte ou null en cas d'erreur
+ */
+function getAccountByRiotId($gameName, $tagLine, $region) {
+    $endpoint = '/riot/account/v1/accounts/by-riot-id/' . urlencode($gameName) . '/' . urlencode($tagLine);
+    return callRiotAPI($region, $endpoint);
+}
+
+/**
+ * Récupère les informations d'un invocateur par PUUID
+ * 
+ * @param string $puuid L'identifiant unique universel du joueur
+ * @param string $region La région de jeu (euw1, na1, etc.)
+ * @return array|null Informations de l'invocateur ou null en cas d'erreur
+ */
+function getSummonerByPUUID($puuid, $region) {
+    $endpoint = '/lol/summoner/v4/summoners/by-puuid/' . $puuid;
+    return callRiotAPI($region, $endpoint);
+}
+
+/**
+ * Récupère les informations d'un invocateur par son nom (ancienne méthode)
+ * 
+ * @param string $summonerName Le nom d'invocateur
+ * @param string $region La région de jeu
+ * @return array|null Informations de l'invocateur ou null en cas d'erreur
+ * @deprecated Utiliser getAccountByRiotId() puis getSummonerByPUUID() à la place
  */
 function getSummonerByName($summonerName, $region) {
     $endpoint = '/lol/summoner/v4/summoners/by-name/' . urlencode($summonerName);
@@ -62,17 +144,112 @@ function getSummonerByName($summonerName, $region) {
 }
 
 /**
- * Vérifie si un invocateur est actuellement en partie
+ * Récupère l'historique des matchs pour un joueur donné
+ * 
+ * @param string $puuid L'identifiant PUUID du joueur
+ * @param string $region La région du joueur
+ * @param int $count Nombre de matchs à récupérer (max 100)
+ * @param int $start Index de départ pour la pagination
+ * @return array|null Liste des identifiants de match ou null en cas d'erreur
  */
-function getCurrentMatch($summonerId, $region) {
-    $endpoint = '/lol/spectator/v4/active-games/by-summoner/' . $summonerId;
-    return callRiotAPI($region, $endpoint);
+function getMatchHistory($puuid, $region, $count = 10, $start = 0) {
+    // Conversion de la région de jeu en région continentale pour l'API Match v5
+    $regionMapping = [
+        'br1' => 'americas', 'eun1' => 'europe', 'euw1' => 'europe', 'jp1' => 'asia',
+        'kr' => 'asia', 'la1' => 'americas', 'la2' => 'americas', 'na1' => 'americas',
+        'oc1' => 'sea', 'ru' => 'europe', 'tr1' => 'europe'
+    ];
+    
+    $continentalRegion = isset($regionMapping[$region]) ? $regionMapping[$region] : 'europe';
+    
+    // Endpoint pour récupérer la liste des matchs
+    $endpoint = '/lol/match/v5/matches/by-puuid/' . $puuid . '/ids';
+    $params = ['start' => $start, 'count' => min($count, 100)];
+    
+    // Appel API avec la région continentale
+    $matchIds = callRiotAPI($continentalRegion, $endpoint, $params);
+    
+    if (!$matchIds) {
+        return [];
+    }
+    
+    return $matchIds;
 }
 
 /**
- * Récupère les détails d'un match en cours
+ * Récupère les détails d'un match spécifique de l'historique
+ * 
+ * @param string $matchId L'identifiant du match
+ * @param string $region La région du joueur
+ * @return array|null Détails du match ou null en cas d'erreur
  */
-function getMatchDetails($gameId, $region) {
+function getMatchDetails($matchId, $region) {
+    // Conversion de la région de jeu en région continentale pour l'API Match v5
+    $regionMapping = [
+        'br1' => 'americas', 'eun1' => 'europe', 'euw1' => 'europe', 'jp1' => 'asia',
+        'kr' => 'asia', 'la1' => 'americas', 'la2' => 'americas', 'na1' => 'americas',
+        'oc1' => 'sea', 'ru' => 'europe', 'tr1' => 'europe'
+    ];
+    
+    $continentalRegion = isset($regionMapping[$region]) ? $regionMapping[$region] : 'europe';
+    
+    // Endpoint pour récupérer les détails du match
+    $endpoint = '/lol/match/v5/matches/' . $matchId;
+    
+    // Vérifier d'abord si les données sont en cache
+    $cacheFile = __DIR__ . '/../cache/match_details_' . $matchId . '.json';
+    
+    // Si le cache existe et date de moins de 24 heures, on l'utilise (les matchs terminés ne changent pas)
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 86400)) {
+        return json_decode(file_get_contents($cacheFile), true);
+    }
+    
+    // Appel API avec la région continentale
+    $matchData = callRiotAPI($continentalRegion, $endpoint);
+    
+    // Si on a des données, on les met en cache
+    if ($matchData) {
+        // Créer le dossier cache s'il n'existe pas
+        if (!is_dir(dirname($cacheFile))) {
+            mkdir(dirname($cacheFile), 0755, true);
+        }
+        
+        file_put_contents($cacheFile, json_encode($matchData));
+    }
+    
+    return $matchData;
+}
+
+/**
+ * Vérifie si un invocateur est actuellement en partie
+ * 
+ * @param string $summonerId L'ID du summoner
+ * @param string $region La région du jeu
+ * @param string $puuid PUUID optionnel si le summoner_id n'est pas disponible
+ * @return array|null Informations sur la partie en cours ou null
+ */
+function getCurrentMatch($summonerId, $region, $puuid = null) {
+    // Si nous avons un ID de sommoner, on l'utilise directement
+    if ($summonerId) {
+        $endpoint = '/lol/spectator/v4/active-games/by-summoner/' . $summonerId;
+        return callRiotAPI($region, $endpoint);
+    } 
+    // Si nous n'avons qu'un PUUID, on essaie d'abord d'obtenir l'ID du sommoner
+    elseif ($puuid) {
+        $summonerData = getSummonerByPUUID($puuid, $region);
+        if ($summonerData && isset($summonerData['id'])) {
+            $endpoint = '/lol/spectator/v4/active-games/by-summoner/' . $summonerData['id'];
+            return callRiotAPI($region, $endpoint);
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Récupère les détails d'un match en cours basé sur l'ID du jeu
+ */
+function getCurrentGameDetails($gameId, $region) {
     // Cette fonction utilise un mélange de l'API de spectateur et du cache local
     // pour obtenir des données complètes sur un match en cours
     
@@ -85,7 +262,6 @@ function getMatchDetails($gameId, $region) {
     }
     
     // Sinon, on appelle l'API
-    // Cet endpoint est fictif car l'API Riot n'a pas d'endpoint spécifique pour les détails d'un match en cours
     // En pratique, on utiliserait l'API spectator pour récupérer les données
     $endpoint = '/lol/spectator/v4/active-games/' . $gameId;
     $matchData = callRiotAPI($region, $endpoint);
@@ -197,63 +373,6 @@ function getQueueTypeById($queueId) {
     ];
     
     return isset($queueTypes[$queueId]) ? $queueTypes[$queueId] : 'Mode personnalisé';
-}
-
-/**
- * Récupère la liste des amis d'un utilisateur
- */
-function getFriendsList($userId) {
-    global $conn;
-    
-    // Simulation des données pour ce projet de démonstration
-    // En réalité, ces données viendraient de la base de données
-    
-    return [
-        [
-            'id' => 1,
-            'summoner_name' => 'Faker',
-            'region' => 'kr',
-            'in_game' => true,
-            'game_mode' => 'Classé Solo/Duo',
-            'champion' => 'LeBlanc',
-            'game_time' => 1245,
-            'game_id' => 'KR_12345678',
-            'last_game' => null
-        ],
-        [
-            'id' => 2,
-            'summoner_name' => 'Caps',
-            'region' => 'euw1',
-            'in_game' => true,
-            'game_mode' => 'Normal Draft',
-            'champion' => 'Syndra',
-            'game_time' => 895,
-            'game_id' => 'EUW_23456789',
-            'last_game' => null
-        ],
-        [
-            'id' => 3,
-            'summoner_name' => 'Doublelift',
-            'region' => 'na1',
-            'in_game' => false,
-            'game_mode' => null,
-            'champion' => null,
-            'game_time' => null,
-            'game_id' => null,
-            'last_game' => 'Il y a 2 heures'
-        ],
-        [
-            'id' => 4,
-            'summoner_name' => 'Rekkles',
-            'region' => 'euw1',
-            'in_game' => false,
-            'game_mode' => null,
-            'champion' => null,
-            'game_time' => null,
-            'game_id' => null,
-            'last_game' => 'Il y a 30 minutes'
-        ]
-    ];
 }
 
 /**

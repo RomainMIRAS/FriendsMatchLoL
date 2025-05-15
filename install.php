@@ -35,6 +35,9 @@ try {
         summoner_name VARCHAR(100),
         region VARCHAR(10),
         notifications_enabled BOOLEAN DEFAULT TRUE,
+        remember_token VARCHAR(64),
+        reset_token VARCHAR(64),
+        reset_token_expires_at DATETIME,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )";
@@ -49,7 +52,8 @@ try {
         region VARCHAR(10) NOT NULL,
         summoner_id VARCHAR(100) NOT NULL,
         puuid VARCHAR(100) NOT NULL,
-        account_id VARCHAR(100) NOT NULL,
+        account_id VARCHAR(100) DEFAULT NULL,
+        riot_id VARCHAR(100) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -102,7 +106,7 @@ try {
         friend_id INT NOT NULL,
         type VARCHAR(50) NOT NULL,
         content TEXT,
-        read BOOLEAN DEFAULT FALSE,
+        `read` BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (friend_id) REFERENCES friends(id) ON DELETE CASCADE

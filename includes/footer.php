@@ -1,7 +1,7 @@
     <footer class="bg-dark text-white mt-5 py-3">
         <div class="container text-center">
             <p>&copy; <?php echo date('Y'); ?> FriendsMatchLoL</p>
-            <p class="small">FriendsMatchLoL n'est pas approuvé par Riot Games et ne reflète pas les opinions ou opinions de Riot Games ou de toute personne impliquée dans la production ou la gestion des propriétés de Riot Games.</p>
+            <p class="small">FriendsMatchLoL isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties.</p>
         </div>
     </footer>
 
